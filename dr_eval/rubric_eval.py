@@ -72,7 +72,7 @@ def evaluate_rubric(
         # Multi-threaded GPT calls
         call_gpt = lambda prompt: judge_model(prompt)
         responses = []
-        with ThreadPoolExecutor(max_workers=min(len(prompts), 10)) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:
             future_to_prompt = {executor.submit(call_gpt, prompt): idx
                                for idx, prompt in enumerate(prompts)}
 
