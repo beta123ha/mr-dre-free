@@ -99,6 +99,7 @@ class DeepResearchAgentBase(ABC):
 
 # Provider registry: maps model prefix/pattern to (module_name, class_name, case_sensitive)
 _PROVIDER_REGISTRY: List[Tuple[str, str, str, bool]] = [
+    ("local-", "local_ollama", "LocalOllamaDeepResearchAgent", True),
     ("sonar-", "perplexity", "SonarDeepResearchAgent", True),
     ("odr-", "odr", "OpenDeepResearchAgent", True),
     ("dr-tulu", "dr_tulu", "DrTuluDeepResearchAgent", True),
