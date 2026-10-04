@@ -92,7 +92,7 @@ def evaluate_checklist(
     # Multi-threaded GPT calls
     call_gpt = lambda prompt: evaluator_model(prompt)
     responses = []
-    with ThreadPoolExecutor(max_workers=min(len(prompts), 20)) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_prompt = {executor.submit(call_gpt, prompt): idx
                            for idx, prompt in enumerate(prompts)}
 
