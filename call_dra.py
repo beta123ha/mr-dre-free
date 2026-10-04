@@ -978,8 +978,12 @@ def call_dra_api_single_turn(
                 time.sleep(poll_interval)
         
         pbar.close()
-        time.sleep(60)
-        logger.info(f"Batch {batch_num} completed, sleeping for 60 seconds to avoid rate limiting")
+
+        if not model_name.startswith("local-"):
+            time.sleep(60)
+            logger.info(
+                f"Batch {batch_num} completed, sleeping for 60 seconds to avoid rate limiting"
+            )
 
     # Log timeout and failure summary at the end
     if timed_out_qids:
