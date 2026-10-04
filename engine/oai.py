@@ -1,6 +1,7 @@
 """OpenAI Deep Research Agent implementation."""
 
 import time
+import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import openai
@@ -170,18 +171,26 @@ class OpenAIDeepResearchAgent(DeepResearchAgentBase):
 @cached()
 def _cached_gpt_call(model_name: str, system_prompt: str, user_prompt: str) -> str:
     """
-    Cached GPT call for cost saving and deterministic requests.
-
-    Cache key is based on model_name, system_prompt, and user_prompt.
+    Cached local LLM call through Ollama's OpenAI-compatible API.
     """
-    client = openai.OpenAI()
-    messages = [{"role": "system", "content": system_prompt}]
-    messages.append({"role": "user", "content": user_prompt})
+    client = openai.OpenAI(
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
+        api_key="ollama",
+        timeout=3600,
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
     response = client.responses.create(
         model=model_name,
         input=messages,
         temperature=0,
+        extra_body={"think": False},
     )
+
     return response.output_text
 
 
@@ -202,7 +211,8 @@ class GPT:
             model_name: OpenAI model identifier.
             system_prompt: Optional system prompt for all calls.
         """
-        self.model_name = model_name
+        self.requested_model_name = model_name
+        self.model_name = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
         self.system_prompt = system_prompt
 
     @retry(
