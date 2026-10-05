@@ -22,6 +22,37 @@ logger = logging.getLogger(__name__)
 
 VALID_JUDGE_RESULTS = {"supported", "insufficient", "contradictory", "no_url"}
 
+def _call_json_with_retry(model, prompt: str, max_attempts: int = 3):
+    last_error = None
+
+    for attempt in range(max_attempts):
+        retry_prompt = prompt
+
+        if attempt > 0:
+            retry_prompt += (
+                f"\n\nRetry {attempt}: Your previous response was invalid JSON. "
+                "Return valid JSON only. Do not use markdown fences. "
+                "Make sure all strings, quotes, commas, brackets, and braces are complete."
+            )
+
+        try:
+            raw = model(retry_prompt).strip()
+
+            if raw.startswith("```json"):
+                raw = raw[7:]
+            elif raw.startswith("```"):
+                raw = raw[3:]
+
+            if raw.endswith("```"):
+                raw = raw[:-3]
+
+            return json.loads(raw.strip())
+
+        except (json.JSONDecodeError, TypeError) as e:
+            last_error = e
+
+    raise last_error
+
 
 def _split_report_into_sections(report: str) -> List[str]:
     """
@@ -87,7 +118,7 @@ def extract_claims(
     prompts = get_citation_claim_extraction_prompts(report, sections)
     
     # Multi-threaded LLM calls
-    call_llm = lambda prompt: json.loads(extraction_model(prompt))
+    call_llm = lambda prompt: _call_json_with_retry(extraction_model, prompt)
     results = []
     with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_prompt = {executor.submit(call_llm, prompt): idx
@@ -147,7 +178,7 @@ def judge_claims(
     # Build prompts - one per claim
     prompts = get_citation_supported_judge_prompts([c for _, c in claims_to_judge])
     
-    call_llm = lambda prompt: json.loads(judge_model(prompt))
+    call_llm = lambda prompt: _call_json_with_retry(judge_model, prompt)
     responses = [None] * len(prompts)
     with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_idx = {executor.submit(call_llm, p): i for i, p in enumerate(prompts)}
