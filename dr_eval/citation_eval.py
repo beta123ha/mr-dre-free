@@ -15,7 +15,7 @@ from dr_eval.eval_prompts import (
     get_citation_supported_judge_prompts,
     get_content_summarization_prompt,
 )
-from dr_eval.crawler.jina import fetch_webpage_content_jina
+from dr_eval.crawler.direct import fetch_webpage_content
 from utils import model_name
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ def extract_claims(
     # Multi-threaded LLM calls
     call_llm = lambda prompt: json.loads(extraction_model(prompt))
     results = []
-    with ThreadPoolExecutor(max_workers=min(len(prompts), 20)) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_prompt = {executor.submit(call_llm, prompt): idx
                            for idx, prompt in enumerate(prompts)}
 
@@ -149,7 +149,7 @@ def judge_claims(
     
     call_llm = lambda prompt: json.loads(judge_model(prompt))
     responses = [None] * len(prompts)
-    with ThreadPoolExecutor(max_workers=min(len(prompts), 10)) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         future_to_idx = {executor.submit(call_llm, p): i for i, p in enumerate(prompts)}
         with tqdm(total=len(prompts), desc="Judging claims", disable=len(prompts) < 5, leave=False) as pbar:
             for future in as_completed(future_to_idx):
@@ -192,14 +192,14 @@ def crawl_urls(urls: List[str]) -> Dict[str, str]:
     
     def crawl_url(url: str) -> Tuple[str, str]:
         try:
-            result = fetch_webpage_content_jina(url)
+            result = fetch_webpage_content(url)
             return (url, result.get("content", ""))
         except Exception as e:
             logger.warning(f"Crawl failed: {url[:50]}...")
             return (url, "")
     
     url_to_content = {}
-    with ThreadPoolExecutor(max_workers=min(len(urls), 20)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(urls), 4)) as executor:
         futures = {executor.submit(crawl_url, url): url for url in urls}
         with tqdm(total=len(urls), desc="Crawling URLs", disable=len(urls) < 3, leave=False) as pbar:
             for future in as_completed(futures):
@@ -247,7 +247,7 @@ def summarize_url_content(
             return (url, url_to_content[url])  # Return original on error
     
     url_to_summary = dict(url_to_content)  # Start with original content
-    with ThreadPoolExecutor(max_workers=min(len(urls_with_content), 10)) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         futures = {executor.submit(summarize, url): url for url in urls_with_content}
         with tqdm(total=len(futures), desc="Summarizing", disable=len(urls_with_content) < 3, leave=False) as pbar:
             for future in as_completed(futures):
