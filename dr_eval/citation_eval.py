@@ -139,8 +139,32 @@ def extract_claims(
     claims = sum(results, [])
     for claim in claims:
         url = claim.get("url", [])
+
         if isinstance(url, str):
-            claim["url"] = [url] if url else []
+            url = [url] if url else []
+
+        elif isinstance(url, dict):
+            value = url.get("url") or url.get("href")
+            url = [value] if isinstance(value, str) and value else []
+
+        elif isinstance(url, list):
+            normalized = []
+
+            for item in url:
+                if isinstance(item, str):
+                    normalized.append(item)
+
+                elif isinstance(item, dict):
+                    value = item.get("url") or item.get("href")
+                    if isinstance(value, str) and value:
+                        normalized.append(value)
+
+            url = normalized
+
+        else:
+            url = []
+
+        claim["url"] = url
     return claims
 
 
