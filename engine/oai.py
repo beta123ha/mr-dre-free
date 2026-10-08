@@ -230,3 +230,30 @@ class GPT:
             Generated response text.
         """
         return _cached_gpt_call(self.model_name, self.system_prompt, user_prompt)
+
+    def call_structured(self, user_prompt: str, schema: dict, name: str) -> str:
+        client = openai.OpenAI(
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
+            api_key="ollama",
+            timeout=3600,
+        )
+
+        response = client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": name,
+                    "strict": True,
+                    "schema": schema,
+                },
+            },
+            temperature=0,
+            extra_body={"think": False},
+        )
+
+        return response.choices[0].message.content or ""
