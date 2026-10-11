@@ -252,7 +252,11 @@ def summarize_url_content(
             return (url, url_to_content[url])  # Return original on error
     
     url_to_summary = dict(url_to_content)  # Start with original content
-    with ThreadPoolExecutor(max_workers=min(len(urls_with_content), 10)) as executor:
+    with ThreadPoolExecutor(max_workers=min(
+        len(urls_with_content),
+        max(1, int(os.getenv("MRDRE_SUMMARY_WORKERS", os.getenv("MRDRE_EVAL_WORKERS", "2"))))
+        if os.getenv("MRDRE_LLM_BACKEND") == "ollama" else 10
+    )) as executor:
         futures = {executor.submit(summarize, url): url for url in urls_with_content}
         with tqdm(total=len(futures), desc="Summarizing", disable=len(urls_with_content) < 3, leave=False) as pbar:
             for future in as_completed(futures):
