@@ -60,7 +60,7 @@ class OpenDeepResearchAgent(DeepResearchAgentBase):
                 "Use retrieved pages as evidence and provide inline citations "
                 "with URLs. Do not invent sources."
             ),
-            "max_concurrent_research_units": int(os.getenv("ODR_RESEARCH_CONCURRENCY", "1")),
+            "max_concurrent_research_units": int(os.getenv("ODR_RESEARCH_CONCURRENCY", "2")),
             "max_researcher_iterations": int(os.getenv("ODR_RESEARCH_ITERATIONS", "6")),
             "max_react_tool_calls": int(os.getenv("ODR_MAX_TOOL_CALLS", "10")),
         }
