@@ -125,3 +125,36 @@ python -m unittest discover -s tests -v
 Các kiểm thử có mô phỏng máy chủ bên ngoài và mô hình, không có chi phí API. **Chưa có bằng chứng chạy toàn bộ LC ODR + Ollama + DuckDuckGo + toàn bộ benchmark thật** trong môi trường tạo bản ZIP (không có Ollama/PyPI/network); phải xác minh ở bước 4 trên máy của bạn. Không gọi bản này "đã tái lập số liệu paper" cho tới khi hoàn thành kiểm thử thực và kiểm tra giám khảo.
 
 Các phụ thuộc `mcp`, `ddgs`, `langchain-ollama` và DRA phải được tải từ internet khi cài đặt lần đầu. Điều này vẫn miễn phí về phí API. Bộ dữ liệu trong ZIP được giữ nguyên và *không* điền kết quả giả vào thư mục `output`.
+
+
+## Cấu hình tốc độ khởi đầu: RTX 4050 6 GB, RAM 32 GB
+
+Chạy trong WSL, ngay trong thư mục benchmark:
+
+```bash
+python scripts/tune_local_performance.py
+```
+
+Lệnh sao lưu `.env` hiện có, sau đó đặt 2 nhánh nghiên cứu đồng thời, 2 lần chấm đồng thời và 2 lần tóm tắt nguồn đồng thời. Đây là **điểm xuất phát để đo tốc độ**, không phải mức tối ưu đã được chứng minh. Đừng tăng đồng thời `--batch_size`, số nhánh nghiên cứu và số luồng Ollama lên cao: số yêu cầu đang hoạt động có thể nhân lên. Khi chạy thật lần đầu, giữ `--batch_size 1`, sau khi kiểm tra ổn định mới thử 2.
+
+Nếu Ollama chạy trên Windows, mở PowerShell và đặt biến môi trường người dùng:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OLLAMA_CONTEXT_LENGTH','16384','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_NUM_PARALLEL','2','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_FLASH_ATTENTION','1','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_KV_CACHE_TYPE','q8_0','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_MAX_LOADED_MODELS','1','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_KEEP_ALIVE','30m','User')
+```
+
+**Thoát hẳn và khởi động lại ứng dụng Ollama** để biến môi trường có hiệu lực; thiết lập này không được thay đổi bởi `.env` của Mr Dre. Nếu Ollama chạy trong WSL dưới dạng dịch vụ, phải đặt các biến ở cấu hình dịch vụ Linux thay vì PowerShell. Bộ đệm `q8_0` tiết kiệm VRAM nhưng có thể tạo sai khác nhỏ về kết quả suy luận; cố định cùng một cấu hình cho cả phương pháp gốc và cải tiến.
+
+Kiểm tra hiệu năng trước khi chạy benchmark dài:
+
+```bash
+python scripts/benchmark_ollama.py
+ollama ps
+```
+
+Bài đo thử 2 yêu cầu ngắn chạy tuần tự và song song, **không thay thế bài thử trên báo cáo dài**. Xem `ollama ps` để kiểm tra mô hình có ở GPU hoàn toàn không. Nếu bộ nhớ bị tràn sang CPU hoặc chạy 2 tác vụ chậm hơn, giảm số nhánh/người chấm đồng thời trong `.env` xuống 1 và `OLLAMA_NUM_PARALLEL` xuống 1 rồi khởi động lại Ollama. Không giảm số vòng nghiên cứu, số lần gọi công cụ, thang đánh giá hoặc ngữ cảnh mà chưa xác minh báo cáo còn đủ độ dài. Mức ngữ cảnh 16K vẫn có thể không đủ cho mọi báo cáo dài; cần kiểm tra thực tế.
