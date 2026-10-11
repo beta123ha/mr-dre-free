@@ -11,7 +11,7 @@ else
     SUBSET=-1
 fi
 
-BATCH_SIZE=${5:-10}
+BATCH_SIZE=${5:-1}
 
 TURN=${3:-1}
 TYPE=${4:-init}
@@ -20,9 +20,9 @@ TYPE=${4:-init}
 mkdir -p ./logs
 
 python call_dra.py \
-    --round $TURN \
+    --turn "$TURN" \
     --type $TYPE \
     --dataset $DATASET \
     --model $MODEL \
     --num_questions $SUBSET \
-    --batch_size $BATCH_SIZE | tee ./logs/gen_${MODEL}_${TYPE}_${DATASET}.log
+    --batch_size "$BATCH_SIZE" | tee ./logs/gen_${MODEL}_${TYPE}_${DATASET}.log

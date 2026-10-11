@@ -4,6 +4,7 @@ Evaluates reports against a checklist of required points.
 """
 
 import json
+import os
 import logging
 import re
 from typing import Dict, List, Any
@@ -42,46 +43,6 @@ def safe_load_json(response: Any, idx: int, question_id: int):
             logger.error(f"JSON decode failed after fix (idx={idx}, Q{question_id}): {e}")
             raise
 
-def call_json_with_retry(
-    evaluator_model,
-    prompt: str,
-    idx: int,
-    question_id: int,
-    max_attempts: int = 3,
-):
-    last_error = None
-
-    for attempt in range(max_attempts):
-        retry_prompt = prompt
-
-        if attempt > 0:
-            retry_prompt += (
-                f"\n\nRetry {attempt}: Your previous response was invalid JSON. "
-                "Return valid JSON only. Do not use markdown fences. "
-                "Make sure all strings, quotes, commas, brackets, and braces are complete."
-            )
-
-        try:
-            response = evaluator_model(retry_prompt).strip()
-
-            if response.startswith("```json"):
-                response = response[7:]
-            elif response.startswith("```"):
-                response = response[3:]
-
-            if response.endswith("```"):
-                response = response[:-3]
-
-            return safe_load_json(
-                response.strip(),
-                idx,
-                question_id,
-            )
-
-        except (json.JSONDecodeError, TypeError) as e:
-            last_error = e
-
-    raise last_error
 
 def evaluate_checklist(
     report_obj: Dict[str, Any],
@@ -130,19 +91,11 @@ def evaluate_checklist(
     prompts = get_checklist_eval_prompts(question, report, checklist)
 
     # Multi-threaded GPT calls
-
+    call_gpt = lambda prompt: evaluator_model(prompt)
     responses = []
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future_to_prompt = {
-            executor.submit(
-                call_json_with_retry,
-                evaluator_model,
-                prompt,
-                idx,
-                report_obj["id"],
-            ): idx
-            for idx, prompt in enumerate(prompts)
-        }
+    with ThreadPoolExecutor(max_workers=min(len(prompts), int(os.getenv("MRDRE_EVAL_WORKERS", "1" if os.getenv("MRDRE_LLM_BACKEND") == "ollama" else "20")))) as executor:
+        future_to_prompt = {executor.submit(call_gpt, prompt): idx
+                           for idx, prompt in enumerate(prompts)}
 
         # Collect results as they complete, maintaining order
         results = [None] * len(prompts)
@@ -163,7 +116,8 @@ def evaluate_checklist(
     covered_points = 0
     total_weights = sum(item["weight"] for item in checklist if item["weight"] > 0)
     checklist_details = []
-    for idx, response_dict in enumerate(responses):
+    for idx, response in enumerate(responses):
+        response_dict = safe_load_json(response, idx, report_obj["id"])
         score, justification = response_dict["score"], response_dict["justification"]
 
         coverage_score += score * checklist[idx]["weight"]

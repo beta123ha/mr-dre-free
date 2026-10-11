@@ -978,12 +978,9 @@ def call_dra_api_single_turn(
                 time.sleep(poll_interval)
         
         pbar.close()
-
-        if not model_name.startswith("local-"):
+        if not model_name.startswith("odr-local"):
             time.sleep(60)
-            logger.info(
-                f"Batch {batch_num} completed, sleeping for 60 seconds to avoid rate limiting"
-            )
+            logger.info(f"Batch {batch_num} completed, sleeping for 60 seconds to avoid rate limiting")
 
     # Log timeout and failure summary at the end
     if timed_out_qids:
@@ -1073,6 +1070,7 @@ def main():
 
     except Exception as e:
         logger.exception(f"Error during processing: {e}")
+        raise SystemExit(1) from e
 
 
 if __name__ == "__main__":

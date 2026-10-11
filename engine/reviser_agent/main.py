@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -38,8 +39,8 @@ class ReviserAgent:
             max_tool_calls: Maximum number of tool calls allowed (default: 10)
             timeout: HTTP request timeout in seconds (default: 1200)
         """
-        self.base_url = base_url.rstrip("/")
-        self.model = model
+        self.base_url = os.getenv("REVISER_BASE_URL", base_url).rstrip("/")
+        self.model = os.getenv("REVISER_MODEL", model)
         self.max_tool_calls = max_tool_calls
         self.timeout = timeout
         self._results: Dict[str, Dict[str, Any]] = {}

@@ -1,7 +1,8 @@
+.env
 .venv/
 __pycache__/
 *.pyc
-.env
-.cache/
-.DS_Store
 output/
+logs/
+*.db
+.pytest_cache/

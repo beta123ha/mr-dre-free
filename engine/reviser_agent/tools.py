@@ -48,6 +48,18 @@ def web_search(query: str, num_results: int = 5) -> str:
     Returns:
         Formatted string with search results
     """
+    if os.getenv("MRDRE_SEARCH", "serper").lower() == "ddg":
+        from local.free_web import search_web
+        try:
+            results = search_web(query, num_results=min(num_results, 10))
+            if not results:
+                return "No search results found."
+            return "\n\n".join(
+                f"{i}. **{item['title']}**\n   URL: {item['url']}\n   {item['snippet']}"
+                for i, item in enumerate(results, 1)
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Free web search failed: {exc}") from exc
     api_key = os.getenv("SERPER_API_KEY")
     if not api_key:
         return "Error: SERPER_API_KEY environment variable is not set."

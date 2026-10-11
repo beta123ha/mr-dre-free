@@ -220,3 +220,11 @@ This is a non-exhausive list. Please see the reference section of our paper for 
 ```
 
 </details>
+
+
+## No-paid-API local benchmark variant
+
+For the zero-paid-API research benchmark setup (Ollama + original LC Open Deep Research +
+free MCP search and direct web reader), see **[README_FREE_BENCHMARK.md](README_FREE_BENCHMARK.md)**.
+This variant preserves the original datasets and prompts; it does **not** claim
+numerical comparability with the GPT-4.1-mini judge or original commercial DRAs.

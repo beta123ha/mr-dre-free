@@ -58,6 +58,9 @@ def fetch_webpage_content_jina(
         - success: Boolean indicating if the fetch was successful
         - error: Error message if fetch failed
     """
+    if os.getenv("MRDRE_CRAWLER", "jina").lower() == "direct":
+        from .direct import fetch_webpage_content_direct
+        return fetch_webpage_content_direct(url, timeout=timeout)
     if not api_key:
         api_key = os.getenv("JINA_API_KEY")
         if not api_key:

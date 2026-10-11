@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import logging
 import re
 import sys
@@ -172,11 +173,7 @@ def citation_stats(cite_v1: List[Dict], cite_v2: List[Dict]) -> Tuple[float, flo
 
 def rubric_stats(rub_v1: List[Dict], rub_v2: List[Dict]) -> float:
     pairs = align_by_id(rub_v1, rub_v2)
-    deltas = [
-        m2["presentation"] - m1["presentation"]
-        for m1, m2 in pairs
-        if "presentation" in m1 and "presentation" in m2
-    ]
+    deltas = [m2["presentation"] - m1["presentation"] for m1, m2 in pairs if "presentation" in m1 and "presentation" in m2]
     return sum(deltas) / len(deltas) if deltas else 0.0
 
 
@@ -211,7 +208,7 @@ def judge_incorporation_rate(gen_reports_v1: List[Dict], gen_reports_v2: List[Di
         }
         return score, result
 
-    max_workers = min(len(pairs), 10) or 1
+    max_workers = min(len(pairs), int(os.getenv("MRDRE_EVAL_WORKERS", "1" if os.getenv("MRDRE_LLM_BACKEND") == "ollama" else "10"))) or 1
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(score_pair, pair): idx for idx, pair in enumerate(pairs)}
         with tqdm(

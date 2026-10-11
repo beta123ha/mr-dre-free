@@ -4,6 +4,7 @@ Evaluates reports against rubrics (currently only presentation rubric).
 """
 
 import json
+import os
 import logging
 from typing import Dict, List, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -72,7 +73,7 @@ def evaluate_rubric(
         # Multi-threaded GPT calls
         call_gpt = lambda prompt: judge_model(prompt)
         responses = []
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        with ThreadPoolExecutor(max_workers=min(len(prompts), int(os.getenv("MRDRE_EVAL_WORKERS", "1" if os.getenv("MRDRE_LLM_BACKEND") == "ollama" else "10")))) as executor:
             future_to_prompt = {executor.submit(call_gpt, prompt): idx
                                for idx, prompt in enumerate(prompts)}
 
@@ -100,6 +101,8 @@ def evaluate_rubric(
                 score = response_dict["score"]
                 justification = response_dict["justification"]
             except (json.JSONDecodeError, KeyError) as e:
+                if os.getenv("MRDRE_LLM_BACKEND") == "ollama":
+                    raise ValueError(f"Local rubric judge returned invalid JSON for item {idx}: {response!r}") from e
                 score = 0.0
                 justification = f"Error parsing response: {str(e)}"
                 logger.error(f"Rubric {dim} item {idx} parse error: {e}")

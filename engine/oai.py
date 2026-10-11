@@ -170,27 +170,46 @@ class OpenAIDeepResearchAgent(DeepResearchAgentBase):
 
 @cached()
 def _cached_gpt_call(model_name: str, system_prompt: str, user_prompt: str) -> str:
+    """Run the original judge/prompt through the selected inference service.
+
+    The prompts and scoring remain those of upstream Mr Dre. Cache keys include
+    the concrete model name and backend URL, so scores cannot be mixed silently.
     """
-    Cached local LLM call through Ollama's OpenAI-compatible API.
-    """
-    client = openai.OpenAI(
-        base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
-        api_key="ollama",
-        timeout=3600,
-    )
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    response = client.responses.create(
-        model=model_name,
-        input=messages,
-        temperature=0,
-        extra_body={"think": False},
-    )
-
+    messages = [{"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}]
+    if model_name.startswith("ollama:"):
+        model = model_name.removeprefix("ollama:").split("@", 1)[0]
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+        client = openai.OpenAI(base_url=f"{base_url}/v1", api_key="ollama", timeout=1800)
+        # JSON mode is only enabled for judges returning JSON. Revision plans
+        # and simulated feedback deliberately keep their original free-text mode.
+        json_mode = ("output only a json" in system_prompt.lower()
+                     or "return a json" in system_prompt.lower()
+                     or 'json string with' in system_prompt.lower()
+                     ) and not ("json list" in system_prompt.lower() or "json array" in system_prompt.lower())
+        options = {"response_format": {"type": "json_object"}} if json_mode else {}
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0,
+            **options,
+        )
+        result = response.choices[0].message.content
+        if not result or not result.strip():
+            raise RuntimeError(f"Empty response from local LLM {model}; check thinking/context limits")
+        if json_mode or "json list" in system_prompt.lower():
+            # Some small local models surround otherwise valid JSON in fences.
+            # Remove *only* that presentation wrapper; do not repair/change scores.
+            clean = result.strip()
+            if clean.startswith("```json") or clean.startswith("```"):
+                clean = clean.partition("\n")[2]
+                if clean.rstrip().endswith("```"):
+                    clean = clean.rstrip()[:-3].strip()
+                result = clean
+        return result
+    # Original paid path is preserved for reproducibility and reference.
+    client = openai.OpenAI()
+    response = client.responses.create(model=model_name, input=messages, temperature=0)
     return response.output_text
 
 
@@ -211,8 +230,12 @@ class GPT:
             model_name: OpenAI model identifier.
             system_prompt: Optional system prompt for all calls.
         """
-        self.requested_model_name = model_name
-        self.model_name = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
+        if os.getenv("MRDRE_LLM_BACKEND", "openai").lower() == "ollama":
+            local_model = os.getenv("MRDRE_LOCAL_MODEL", "qwen3:4b")
+            # Redirect ONLY model calls, never change evaluation prompts.
+            self.model_name = f"ollama:{local_model}"
+        else:
+            self.model_name = model_name
         self.system_prompt = system_prompt
 
     @retry(
@@ -229,31 +252,4 @@ class GPT:
         Returns:
             Generated response text.
         """
-        return _cached_gpt_call(self.model_name, self.system_prompt, user_prompt)
-
-    def call_structured(self, user_prompt: str, schema: dict, name: str) -> str:
-        client = openai.OpenAI(
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
-            api_key="ollama",
-            timeout=3600,
-        )
-
-        response = client.chat.completions.create(
-            model=self.model_name,
-            messages=[
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": name,
-                    "strict": True,
-                    "schema": schema,
-                },
-            },
-            temperature=0,
-            extra_body={"think": False},
-        )
-
-        return response.choices[0].message.content or ""
+        return _cached_gpt_call(self.model_name + ("@" + os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434") if self.model_name.startswith("ollama:") else ""), self.system_prompt, user_prompt)
