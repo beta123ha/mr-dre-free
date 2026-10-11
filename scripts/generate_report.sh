@@ -11,7 +11,7 @@ else
     SUBSET=-1
 fi
 
-BATCH_SIZE=${5:-1}
+BATCH_SIZE=${5:-2}
 
 TURN=${3:-1}
 TYPE=${4:-init}
