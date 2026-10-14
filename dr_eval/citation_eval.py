@@ -45,7 +45,7 @@ def _split_report_into_sections(report: str) -> List[str]:
     sections = [s for s in sections if s.strip() != ""]
 
     # Adaptively choose step to split into 4 parts, with minimum 2 sections per part
-    step = max(2, -(-len(sections) // 4))  # ceiling division, min 2
+    step = 1
     
     processed_sections = []
     for i in range(0, len(sections), step):
@@ -88,7 +88,72 @@ def extract_claims(
     prompts = get_citation_claim_extraction_prompts(report, sections)
     
     # Multi-threaded LLM calls
-    call_llm = lambda prompt: json.loads(extraction_model(prompt))
+    def call_llm(prompt):
+        if os.getenv("MRDRE_LLM_BACKEND", "").lower() != "ollama":
+            return json.loads(extraction_model(prompt))
+
+        import hashlib
+        import requests
+        from engine.cache import DEFAULT_CACHE
+
+        base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+        model = os.getenv("MRDRE_LOCAL_MODEL", "qwen3.5:4b")
+        system_prompt = extraction_model.system_prompt
+
+        schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim": {"type": "string"},
+                    "url": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["claim", "url"],
+                "additionalProperties": False
+            }
+        }
+
+        cache_input = json.dumps(
+            [model, base, system_prompt, prompt, "structured-v1"],
+            ensure_ascii=False
+        )
+        key = "structured_claims:" + hashlib.sha256(
+            cache_input.encode()
+        ).hexdigest()
+
+        cached = DEFAULT_CACHE.get(key)
+        if cached is not None:
+            return cached
+
+        response = requests.post(
+            base + "/api/chat",
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+                "think": False,
+                "format": schema,
+                "options": {"temperature": 0, "num_predict": 8192}
+            },
+            timeout=1800
+        )
+        response.raise_for_status()
+
+        claims = json.loads(response.json()["message"]["content"])
+        if not isinstance(claims, list) or not all(
+            isinstance(c, dict)
+            and isinstance(c.get("claim"), str)
+            and isinstance(c.get("url"), list)
+            and all(isinstance(u, str) for u in c["url"])
+            for c in claims
+        ):
+            raise ValueError("Invalid claim extraction output")
+
+        DEFAULT_CACHE.set(key, claims)
+        return claims
     results = []
     with ThreadPoolExecutor(max_workers=min(len(prompts), int(os.getenv("MRDRE_EVAL_WORKERS", "1" if os.getenv("MRDRE_LLM_BACKEND") == "ollama" else "20")))) as executor:
         future_to_prompt = {executor.submit(call_llm, prompt): idx

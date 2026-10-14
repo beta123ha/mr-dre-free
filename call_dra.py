@@ -68,21 +68,8 @@ def get_feedbacks(
     prev_turn = current_turn - 1
     if prev_turn == 1:
         prev_turn_type = "init"
-
     else:
         prev_turn_type = current_turn_type
-        # Add k-value suffix to prev_turn_type if needed
-        if num_items is not None and prev_turn != 1:
-            # Check if prev_turn_type is a refined type
-            if prev_turn_type.startswith('refined_'):
-                # Extract original type
-                original_type = prev_turn_type[len('refined_'):]
-                # Only add k-value suffix if original type needs it
-                if original_type == 'content_feedback':
-                    prev_turn_type = f"{prev_turn_type}_k={num_items}"
-            elif prev_turn_type == 'content_feedback':
-                # For non-refined specific types, add k-value suffix if needed
-                prev_turn_type = f"{prev_turn_type}_k={num_items}"
     
     # -------------------- Handle different feedback types --------------------
     if current_turn_type == "content_feedback":

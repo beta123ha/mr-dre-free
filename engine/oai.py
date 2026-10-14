@@ -192,6 +192,8 @@ def _cached_gpt_call(model_name: str, system_prompt: str, user_prompt: str) -> s
             model=model,
             messages=messages,
             temperature=0,
+            reasoning_effort="none",
+            max_tokens=8192,
             **options,
         )
         result = response.choices[0].message.content
