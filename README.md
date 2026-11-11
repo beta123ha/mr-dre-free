@@ -1,222 +1,68 @@
-# Mr Dre: Evaluation Suite for Deep Research Report Writing and Multi-turn Revision
+# MR DRE baseline — Kaggle Free
 
-<p align="center">
-    <a href="https://www.arxiv.org/abs/2601.13217" target="_blank" rel="noopener noreferrer">
-        <img alt="Paper" src="https://img.shields.io/badge/paper-paper?logo=arxiv&logoColor=%23B31B1B&labelColor=white&color=%23B31B1B">
-    </a>
-    &nbsp;&nbsp;
-    <a href="https://x.com/BaleCcchen/status/2015792860440793228" target="_blank" rel="noopener noreferrer">
-        <img alt="X (formerly Twitter) URL" src="https://img.shields.io/twitter/url?url=https%3A%2F%2Fx.com%2FBaleCcchen%2Fstatus%2F2015792860440793228&label=Thread">
-    </a>
-</p>
+Baseline **trước ReviFence**, tái lập các bước của *Beyond Single-shot Writing: Deep Research Agents are Unreliable at Multi-turn Report Revision* (ACL 2026). Mặc định chỉ dùng **ResearcherBench (65 câu, nhỏ nhất)** và **LangChain Open Deep Research**.
 
-Official repository for the paper [*"Beyond Single-shot Writing: Deep Research Agents are Unreliable at Multi-turn Report Revision"*](https://www.arxiv.org/abs/2601.13217).
+## Chạy bằng một notebook
 
-Human researchers rarely write a report in a single shot, as we iteratively draft and revise from peer feedback or self-reflection. Can Deep Research Agents also reliably revise their reports in response to user feedback? We introduce **Mr Dre**, a new evaluation suite for Deep Research Agents (DRAs) on *multi-turn report writing and revision*. Specifically, Mr Dre includes:
+1. Trên [Kaggle Code](https://www.kaggle.com/code), tạo Notebook, chọn **File → Import Notebook** và tải lên `MRDRE_Baseline_Kaggle_Complete.ipynb` trong `notebooks/` (cũng được phát hành thành file riêng).
+2. Trong **Settings** chọn **Accelerator = GPU T4 x2**, **Internet = On**. Không cần nhập API key. Kaggle yêu cầu xác minh tài khoản để dùng GPU trên một số tài khoản.
+3. Chạy các ô từ trên xuống. Notebook tự giải nén mã/dữ liệu, cài Ollama và graph ODR gốc, chạy **một câu thử thật**, rồi tiếp tục 65 câu. Để chạy không cần giữ phiên tương tác, dùng **Save Version → Save & Run All**.
+4. Lấy `/kaggle/working/baseline-results.zip` trong tab **Output** sau khi phiên kết thúc. Nếu chưa xong, tải ZIP đó lên Kaggle thành **Dataset**, rồi **Add Input** Dataset vào notebook và chạy lại nguyên notebook. Ô đầu tự phục hồi checkpoint, bỏ qua các câu/điểm chấm đã xong.
+5. Chỉ xem dòng `complete=True` trong `output/metrics/*_summary.csv` là xong trọn bộ. Các ô trống không phải điểm 0, mà là phần đánh giá chưa thực hiện.
 
-1. **A Unified Evaluation Protocol for Deep Research Reports:** We consolidated best practices from previous Deep Research evaluation works into a lean protocol spanning three dimensions: *Comprehensiveness*, *Factuality*, and *Presentation*.
-2. **Feedback Simulation Pipeline for Multi-turn Report Revision:** To evaluate not only the single-shot writing capabilities of Deep Research Agents but also their multi-turn report revision ability, we introduce a reliable method to simulate content, format, and self-reflection feedback.
+**Mặc định:** `N_QUESTIONS=65`, `FEEDBACK='all'`, `EXTRA_EVAL='all'`. `all` gồm **Content1, Format, Reflect** (bảng kết quả chính của paper, riêng ResearcherBench); phản hồi tự suy xét không có Incorporation. Nếu cần **hoàn thành một thí nghiệm đủ sáu chỉ số nhanh hơn**, đổi `FEEDBACK='content'` rồi mới chạy thêm `format` và `reflect` ở các phiên sau, **không thay mô hình hoặc tham số**. Turn 1 được dùng chung.
 
-<img src="assets/mrdre_overview.png" alt="Overview of Mr Dre">
+## Sáu chỉ số
 
-## Table of Contents
+| Cột CSV | Định nghĩa gốc |
+|---|---|
+| `coverage_t1/t2`, `coverage_delta` | Coverage (Cov.): chấm checklist 0 / 0,5 / 1, trung bình có trọng số, kể cả trọng số âm |
+| `faithfulness_t1/t2`, `faithfulness_delta` | Citation Faithfulness (Fa.): tỷ lệ khẳng định có dẫn nguồn được nguồn ủng hộ |
+| `groundedness_t1/t2`, `groundedness_delta` | Claim Groundedness (Gr.): tỷ lệ mọi khẳng định được chứng cứ ủng hộ |
+| `presentation_t1/t2`, `presentation_delta` | Presentation (Pre.): 10 tiêu chí định dạng, bỏ những tiêu chí không áp dụng |
+| `incorporation` | Inc.: đạt đầy đủ mục tiêu Content1 hoặc chấm cặp báo cáo cho Format (N/A với Reflect) |
+| `break_rate` | Brk.: số tiêu chí đã đạt nhưng bị giảm / số tiêu chí đã đạt, **theo Phụ lục B.4 paper**, tính cả tiêu chí nằm trong phản hồi |
 
-- [News](#news)
-- [Setup](#setup)
-- [Data](#data)
-- [DRA Report Generation](#dra-report-generation)
-- [DRA Report Evaluation](#dra-report-evaluation)
-- [Release Progress](#release-progress)
-- [Contact Us](#contact-us)
-- [Citation](#citation)
+Tệp đầu ra: `output/metrics/{content,format,reflect}_summary.csv` và `*_per_question.csv`. Cột `n_*` cho biết có bao nhiêu câu đã thực sự được chấm ở từng chỉ số. **Không tính 0 giả cho câu lỗi**, không tuyên bố kết quả hoàn chỉnh nếu thiếu bất kỳ đánh giá bắt buộc nào.
 
-## News
-[01/20/2026] Initial Code Release🎉
+## Tối ưu chi phí thời gian
 
-## Setup
+- T4 x2: GPU0 tạo báo cáo; GPU1 chấm; bài đã có kết quả được bỏ qua, điểm chấm và phản hồi được tái sử dụng.
+- Mô hình Ollama `qwen3:4b-instruct` (nhỏ, hỗ trợ gọi công cụ và cấu trúc dữ liệu). Chỉ tải mô hình một lần rồi hai server GPU dùng chung tệp mô hình.
+- Câu hỏi và feedback seed cố định; lưu JSONL nguyên tử, checkpoint ZIP theo từng nhóm 5 câu. Chạy lại không mất tiến độ đã chấm xong.
+- Đọc web qua DuckDuckGo + thư viện HTML/PDF miễn phí; không chuyển dữ liệu qua API LLM trả phí.
+- Bật `EXTRA_EVAL='all'` để **đủ sáu chỉ số**. FA/GR là phần tốn nhiều nhất do bóc tách từng khẳng định, tải nguồn, tóm tắt và đối chiếu; bỏ phần này sẽ không còn là bảng sáu chỉ số.
 
-We recommend using [uv](https://github.com/astral-sh/uv) to quickly set up and manage your environment:
+**Khác với số liệu bài báo:** paper chạy 5 DRA, dùng GPT-4.1-mini/GPT-4.1-nano để chấm, còn bản Kaggle này chỉ chạy 1 DRA và thay mô hình bằng Qwen3-4B, thay dịch vụ web. Cấu hình nhanh giới hạn số vòng nghiên cứu (3) và lượt công cụ (6), thấp hơn mặc định ODR (6 và 10). Đây là **tái lập quy trình và thước đo với hạn chế tài nguyên**, không phải tái lập được con số trong Table 2; dùng **cùng cấu hình** cho ReviFence để so sánh công bằng. Không sử dụng hai phương án PE/Reviser trong §6 của paper và không áp dụng ReviFence.
 
-```shell
-# Clone the repository
-git clone https://github.com/BaleChen/mt-dra.git
-cd mt-dra
+## Cấu trúc
 
-# Set up the environment
-uv sync
-
-# Activate the virtual environment
-source .venv/bin/activate
+```text
+MRDRE-Baseline-Kaggle-Complete/
+├── notebooks/MRDRE_Baseline_Kaggle_Complete.ipynb
+├── kaggle/
+│   ├── bootstrap.py               # Cài Ollama / LangGraph / dịch vụ tìm kiếm
+│   ├── run.py                     # Pipeline sinh, sửa, chấm, checkpoint
+│   └── metrics.py                 # Sáu phép đo của paper, gộp theo ID
+├── src/mrdre_baseline/
+│   ├── agents/                    # Adapter LC Open Deep Research & model local
+│   ├── workflows/                 # Sinh báo cáo, phản hồi, chấm điểm
+│   ├── evaluation/                # Checklist, citation, presentation
+│   ├── services/                  # MCP web tools miễn phí
+│   └── core/                      # Đọc/ghi an toàn
+├── data/                          # Dữ liệu gốc, giữ nguyên
+├── docs/METHODOLOGY.md            # Khác biệt so với paper
+├── tests/                         # Kiểm thử dữ liệu, metric, checkpoint
+└── pyproject.toml
 ```
 
-
-Then, set your API keys as environment variables by defining them in `.env`. You can use our provided `.env.example` as a reference. We require four API Keys: `OPENAI_API_KEY`, `PERPLEXITY_API_KEY`, `JINA_API_KEY`, and `SERPER_API_KEY`.
-
-> **Note:** Tongyi Deep Research, DR Tulu, and Open Deep Research require customized environment setup. We recommend isolating the server-side and client-side environments for best compatibility. See [`engine/README.md`](engine/README.md) for detailed instructions on setting up each DRA engine's server.
-
-## Data
-
-We provide the three datasets used in our experiments in the `./data` folder:
-
-- [ResearchRubrics](https://scale.com/research/researchrubrics): `ResearchRubrics.jsonl`
-- [RigorousBench](https://github.com/evigbyen/rigorousbench): `RigorousBench.jsonl`
-- [ResearcherBench](https://github.com/GAIR-NLP/ResearcherBench): `ResearcherBench.jsonl`
-
-These JSONL files are preprocessed into a standardized format compatible with the report writing, revision, and evaluation pipelines in this repository.
-
-<details>
-<summary>Dataset Sample Format</summary>
-
-```
-{
-    "id": (int | str) Question ID,
-    "question": (str) Question text,
-    "checklist": (List[Dict]) [
-        {
-            "id": (int) Checklist item ID,
-            "item": (str) Checklist item text,
-            "weight": (int) Checklist item weight score
-        }
-    ],
-    "metadata": (Dict) { ... metadata from different datasets }
-}
-```
-
-</details>
-
-To bring your own dataset, ensure the questions have annotated *question-specific checklists* for report comprehensiveness evaluation. Process your dataset into a JSONL file following the format above and name it `YOUR_DATASET_NAME.jsonl`.
-
-## DRA Report Generation
-
-Use `generate_report.sh` to generate reports with supported DRAs. This script supports multi-turn report generation or revision with different feedback types.
-
-### Notes
-- The first turn is always generated with type `init`.
-- Generating turn *n* requires that turns 1 to *n-1* have already been generated.
-- Before applying `content_feedback` type to turn *n*, the model output for turn *n-1* must be evaluated (at least the checklist mode evaluation is done, since feedback generation relies on failed checklist criteria).
-
-### Basic Usage
-
-Use the provided shell script for easier execution:
+## Chạy dòng lệnh (trong Kaggle)
 
 ```bash
-./scripts/generate_report.sh <dataset> <model> <turn> <type>
+python kaggle/bootstrap.py
+python kaggle/run.py --count 1 --feedback all --extra-eval all
+python kaggle/run.py --count 65 --feedback all --extra-eval all --chunk-size 5 --budget-minutes 600
+python -m kaggle.metrics --output-root /kaggle/working/output --feedback all --count 65
 ```
 
-### Key Parameters
-The `evaluate_report.sh` script accepts the following parameters:
-- `<dataset>`: Dataset name (`ResearcherBench`, `RigorousBench`, `ResearchRubrics`) [required]
-- `<model>`: Model name (`dr-tulu`, `o4-mini-deep-research`, `o4-gpt4.1`, `sonar-deep-research`, `tongyi-deep-research`) [required]
-- `<turn>`: Turn number (starting from 1) [default: 1]
-- `<type>`: Turn type (`init`, `reflection`, `content_feedback`, `format_feedback`) [default: init]
-
-## DRA Report Evaluation
-
-Use `evaluate_report.sh` to evaluate generated Deep Research reports. It supports three evaluation modes: checklist, citation, and rubric. Note that the three modes correspond to our three evaluation dimentions defined in our paper: Comprehensiveness is measured by *checklist* coverage; Factuality uses *citation*-based metrics (citation faithfulness and claim groundedness); Presentation score relies on a fixed set of *rubrics* to evaluate.
-
-### Basic Usage
-
-Use the provided shell script for easier execution:
-
-```bash
-./scripts/evaluate_report.sh <report_file> <dataset_file> (<eval_mode> <num_questions>)
-```
-
-### Key Parameters
-The `evaluate_report.sh` script accepts the following parameters:
-- `<report_file>`: Path to generated report JSONL file [required]
-- `<dataset_file>`: Path to dataset JSONL file [required]
-- `<eval_mode>`: Optional. Evaluation mode (`all`, `checklist`, `citation`, `rubric`) [default: all]
-- `<num_questions>`: Optional. Number of questions to evaluate (-1 for all) [default: -1]
-
-Incorporation rate and break rate evalution guide incoming...🧑‍💻
-
-## Release Progress
-
-- [x] Main evaluation protocol
-- [x] Setup quickstart
-- [x] Main engine and generation code
-- [x] Feedback simulation
-- [x] Datasets used in our paper
-- [x] Shell scripts for easy generation/evaluation
-- [ ] "How to Evaluate External DR Reports?" guide
-- [ ] Tongyi, DR Tulu, Open Deep Research server-side code
-- [ ] "How to Add a New DRA Engine" guide
-
-## Contact Us
-
-If you have any questions, feel free to email me at `bale[dot]chen[at]nyu[dot]edu`. If you encounter any issues, you can also open an issue on this repository. Please include your setup details and a code snippet to reproduce the problem so we can help resolve it quickly!
-
-## Citation
-
-If you find our work useful, please cite us:
-
-```bibtex
-@misc{chen2026singleshotwritingdeepresearch,
-      title={Beyond Single-shot Writing: Deep Research Agents are Unreliable at Multi-turn Report Revision}, 
-      author={Bingsen Chen and Boyan Li and Ping Nie and Yuyu Zhang and Xi Ye and Chen Zhao},
-      year={2026},
-      eprint={2601.13217},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2601.13217}, 
-}
-```
-
-<details>
-<summary>Mr Dre builds upon several existing DRA benchmarks and evaluation frameworks, please consider citing them as well:</summary>
-
-This is a non-exhausive list. Please see the reference section of our paper for more information.
-```bibtex
-@misc{sharma2025researchrubrics,
-      title={ResearchRubrics: A Benchmark of Prompts and Rubrics For Evaluating Deep Research Agents}, 
-      author={Manasi Sharma and Chen Bo Calvin Zhang and Chaithanya Bandi and Clinton Wang and Ankit Aich and Huy Nghiem and Tahseen Rabbani and Ye Htet and Brian Jang and Sumana Basu and Aishwarya Balwani and Denis Peskoff and Marcos Ayestaran and Sean M. Hendryx and Brad Kenstler and Bing Liu},
-      year={2025},
-      eprint={2511.07685},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2511.07685}, 
-}
-
-@misc{yao2025rigorousbench,
-      title={A Rigorous Benchmark with Multidimensional Evaluation for Deep Research Agents: From Answers to Reports}, 
-      author={Yang Yao and Yixu Wang and Yuxuan Zhang and Yi Lu and Tianle Gu and Lingyu Li and Dingyi Zhao and Keming Wu and Haozhe Wang and Ping Nie and Yan Teng and Yingchun Wang},
-      year={2025},
-      eprint={2510.02190},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2510.02190}, 
-}
-
-@misc{xu2025researcherbench,
-      title={ResearcherBench: Evaluating Deep AI Research Systems on the Frontiers of Scientific Inquiry}, 
-      author={Tianze Xu and Pengrui Lu and Lyumanshan Ye and Xiangkun Hu and Pengfei Liu},
-      year={2025},
-      eprint={2507.16280},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2507.16280}, 
-}
-
-@misc{wang2025liveresearchbench,
-      title={LiveResearchBench: A Live Benchmark for User-Centric Deep Research in the Wild}, 
-      author={Jiayu Wang and Yifei Ming and Riya Dulepet and Qinglin Chen and Austin Xu and Zixuan Ke and Frederic Sala and Aws Albarghouthi and Caiming Xiong and Shafiq Joty},
-      year={2025},
-      eprint={2510.14240},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2510.14240}, 
-}
-
-@misc{fan2025understandingdeepresearchreports,
-      title={Understanding DeepResearch via Reports}, 
-      author={Tianyu Fan and Xinyao Niu and Yuxiang Zheng and Fengji Zhang and Chengen Huang and Bei Chen and Junyang Lin and Chao Huang},
-      year={2025},
-      eprint={2510.07861},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2510.07861}, 
-}
-```
-
-</details>
+Mỗi phiên Kaggle miễn phí có hạn mức; **không thể đảm bảo 65 câu × 3 loại phản hồi × toàn bộ chấm trích dẫn xong trong một phiên**. Cần kết nối mạng và GPU Kaggle thật để kiểm thử đầu cuối; kiểm thử offline trong dự án không phải là bằng chứng đã chạy thực tế trên Kaggle.
