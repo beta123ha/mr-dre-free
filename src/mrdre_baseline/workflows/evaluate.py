@@ -68,6 +68,7 @@ def evaluate_reports(
     rubric_judge_model_name: str = None,
     ignore_existing: bool = False,
     num_questions: int = -1,
+    question_id: str | None = None,
     **kwargs
 ):
     """
@@ -95,10 +96,16 @@ def evaluate_reports(
     dataset = load_dataset(dataset_file)
     logger.info(f"Loaded {len(reports)} reports, {len(dataset)} dataset items")
 
+    if question_id is not None:
+        reports = [r for r in reports if str(r.get("id")) == str(question_id)]
+        dataset = {key: value for key, value in dataset.items() if str(key) == str(question_id)}
+        if len(reports) != 1 or len(dataset) != 1:
+            raise ValueError(f"Question {question_id} missing/duplicated in reports or dataset")
+
     # Filter to sampled subset if num_questions is specified
     # Uses the same logic as call_dra.py to ensure the same subset is selected
     sampled_ids = None
-    if num_questions > 0:
+    if num_questions > 0 and question_id is None:
         # Load dataset as list and shuffle with same seed as call_dra.py
         dataset_list = load_jsonl(dataset_file)
         random.seed(42)
@@ -319,6 +326,7 @@ def main():
                         help="Number of questions to evaluate (default: -1 for all). "
                              "Uses the same seed (42) as call_dra.py to select the same subset.")
     
+    parser.add_argument("--question-id", default=None, help="Evaluate only this exact question ID")
     args = parser.parse_args()
     
     evaluate_reports(
@@ -332,7 +340,8 @@ def main():
         webpage_summarization_model_name=args.webpage_summarization_model,
         rubric_judge_model_name=args.rubric_judge_model,
         ignore_existing=args.ignore_existing,
-        num_questions=args.num_questions
+        num_questions=args.num_questions,
+        question_id=args.question_id,
     )
 
 

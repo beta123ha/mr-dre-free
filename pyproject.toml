@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mrdre-baseline"
 version = "0.2.0"
-description = "Reproducible MR DRE baseline benchmark on Kaggle Free"
+description = "Resumable single-question MR DRE baseline for local, Kaggle and Colab"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -20,6 +20,7 @@ dependencies = [
     "beautifulsoup4>=4.12,<5",
     "pypdf>=5,<7",
     "mcp>=1.15,<2",
+    "psutil>=6,<8",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,9 @@ mrdre-baseline-generate = "mrdre_baseline.workflows.generate:main"
 mrdre-baseline-evaluate = "mrdre_baseline.workflows.evaluate:main"
 mrdre-baseline-compare = "mrdre_baseline.workflows.compare:main"
 mrdre-baseline-search = "mrdre_baseline.services.search_mcp:main"
+mrdre-run = "mrdre_baseline.runtime.runner:main"
+mrdre-summarize = "mrdre_baseline.runtime.summary:main"
+mrdre-bootstrap = "mrdre_baseline.runtime.bootstrap:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

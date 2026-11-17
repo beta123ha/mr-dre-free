@@ -1024,6 +1024,7 @@ def main():
              "sending feedback as another conversation turn to DRA.",
     )
 
+    parser.add_argument("--question-id", default=None, help="Process only this exact dataset question ID")
     parser.add_argument("--output-root", default="output", help="Checkpoint root directory")
     parser.add_argument("--shard-count", type=int, default=1, help="Number of dataset shards")
     parser.add_argument("--shard-index", type=int, default=0, help="Zero-based worker shard index")
@@ -1039,9 +1040,17 @@ def main():
     questions = load_jsonl(question_data)
     logger.info(f"Loaded {len(questions)} questions from {args.dataset}")
 
+    # Select the same stable shuffled order as upstream, then one exact ID.
+    # This permits a question-complete runner without generating preceding IDs.
+    if args.question_id is not None:
+        matched = [q for q in questions if str(q["id"]) == args.question_id]
+        if len(matched) != 1:
+            parser.error(f"--question-id {args.question_id!r} is not unique/present in dataset")
+        questions = matched
+
     # Stable partition across GPUs and resumptions. All workers use the same
     # shuffled global order and sample before taking their own disjoint shard.
-    if args.num_questions > 0:
+    if args.num_questions > 0 and args.question_id is None:
         rng = random.Random(42)
         rng.shuffle(questions)
         questions = questions[:args.num_questions]

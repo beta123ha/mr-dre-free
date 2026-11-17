@@ -177,10 +177,12 @@ def _cached_gpt_call(model_name: str, system_prompt: str, user_prompt: str) -> s
     """
     messages = [{"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}]
-    if model_name.startswith("ollama:"):
-        model = model_name.removeprefix("ollama:").split("@", 1)[0]
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-        client = openai.OpenAI(base_url=f"{base_url}/v1", api_key="ollama", timeout=1800)
+    if model_name.startswith(("ollama:", "vllm:")):
+        is_vllm = model_name.startswith("vllm:")
+        model = model_name.split(":", 1)[1].split("@", 1)[0]
+        base_url = (os.getenv("VLLM_BASE_URL", "http://127.0.0.1:8002/v1") if is_vllm
+                    else os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/") + "/v1")
+        client = openai.OpenAI(base_url=base_url, api_key="EMPTY" if is_vllm else "ollama", timeout=1800)
         # JSON mode is only enabled for judges returning JSON. Revision plans
         # and simulated feedback deliberately keep their original free-text mode.
         json_mode = ("output only a json" in system_prompt.lower()
@@ -192,7 +194,7 @@ def _cached_gpt_call(model_name: str, system_prompt: str, user_prompt: str) -> s
             model=model,
             messages=messages,
             temperature=0,
-            reasoning_effort="none",
+            **({} if is_vllm else {"reasoning_effort": "none"}),
             max_tokens=8192,
             **options,
         )
@@ -232,10 +234,11 @@ class GPT:
             model_name: OpenAI model identifier.
             system_prompt: Optional system prompt for all calls.
         """
-        if os.getenv("MRDRE_LLM_BACKEND", "openai").lower() == "ollama":
+        backend = os.getenv("MRDRE_LLM_BACKEND", "openai").lower()
+        if backend in ("ollama", "vllm"):
             local_model = os.getenv("MRDRE_LOCAL_MODEL", "qwen3:4b-instruct")
-            # Redirect ONLY model calls, never change evaluation prompts.
-            self.model_name = f"ollama:{local_model}"
+            fingerprint = os.getenv("MRDRE_MODEL_FINGERPRINT", "")
+            self.model_name = f"{backend}:{local_model}" + (f"@{fingerprint}" if fingerprint else "")
         else:
             self.model_name = model_name
         self.system_prompt = system_prompt

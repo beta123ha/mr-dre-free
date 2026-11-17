@@ -14,3 +14,8 @@ baseline-runtime.json
 baseline-results.zip
 ollama-models/
 open_deep_research/
+
+*.pid
+baseline-logs/
+run_state/
+.ipynb_checkpoints/
