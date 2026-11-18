@@ -226,13 +226,14 @@ def evaluate_reports(
                     claim_extraction_model,
                     supported_judge_model,
                     webpage_summarization_model=webpage_summarization_model,
+                    progress_dir=output_path / ".citation_progress" / f"q{question_id}_turn{turn}",
                     **kwargs
                 )
                 existing_citation_ids.add(question_id)
                 combined_citation_metrics.append(metric)
                 append_jsonl(metric, str(citation_output))
             except Exception as e:
-                logger.error(f"Citation eval failed for Q{question_id}: {e}")
+                logger.exception("Citation eval failed for Q%s", question_id)
                 continue
         
         # Aggregate and save dataset-level metrics across all evaluations

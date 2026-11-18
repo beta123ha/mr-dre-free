@@ -28,6 +28,23 @@ def command(args: list[str], *, cwd: Path | None = None, env: dict | None = None
     subprocess.run(args, cwd=cwd, env=env, check=True)
 
 
+def ensure_zstd(profile: str) -> None:
+    """Install zstd when needed by the official Ollama Linux installer."""
+    if shutil.which("zstd"):
+        return
+    if profile not in ("kaggle", "colab"):
+        raise RuntimeError("Install zstd before Ollama: sudo apt-get install zstd")
+    if not shutil.which("apt-get"):
+        raise RuntimeError("zstd missing; install it using your system package manager")
+    prefix = [] if os.geteuid() == 0 else (["sudo"] if shutil.which("sudo") else [])
+    if not prefix and os.geteuid() != 0:
+        raise RuntimeError("zstd missing and no root/sudo privileges to install it")
+    command(prefix + ["apt-get", "update", "-qq"])
+    command(prefix + ["apt-get", "install", "-y", "-qq", "zstd"])
+    if not shutil.which("zstd"):
+        raise RuntimeError("zstd installation did not succeed")
+
+
 def online(url: str) -> bool:
     try:
         with urlopen(url, timeout=2) as resp:
@@ -46,13 +63,14 @@ def wait_online(url: str, label: str, timeout: int = 120) -> None:
     raise RuntimeError(f"{label} did not start: {url}")
 
 
-def service(name: str, args: list[str], env: dict, workdir: Path, logs: Path) -> None:
+def service(name: str, args: list[str], env: dict, workdir: Path, logs: Path) -> subprocess.Popen:
     logs.mkdir(parents=True, exist_ok=True)
     with (logs / f"{name}.log").open("ab", buffering=0) as log:
         proc = subprocess.Popen(args, env=env, cwd=workdir, stdout=log,
                                 stderr=subprocess.STDOUT, start_new_session=True)
     (logs / f"{name}.pid").write_text(str(proc.pid), encoding="utf-8")
     print(f"[STARTED] {name}: PID {proc.pid}", flush=True)
+    return proc
 
 
 def port_open(host: str, port: int) -> bool:
@@ -79,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--workdir", type=Path)
     ap.add_argument("--model", default=os.getenv("MRDRE_BASELINE_MODEL", "qwen3:4b-instruct"))
     ap.add_argument("--odr-ref", default=os.getenv("ODR_REF", ""), help="Pin upstream ODR commit/tag for reproducibility")
+    ap.add_argument("--odr-transport", choices=["auto", "server", "direct"], default="auto",
+                    help="direct runs the official ODR graph without LangGraph dev server")
     ap.add_argument("--install", dest="install", action="store_true", default=True)
     ap.add_argument("--no-install", dest="install", action="store_false")
     ap.add_argument("--allow-cpu", action="store_true", help="Run serially without NVIDIA GPU (very slow)")
@@ -89,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     if sys.version_info < (3, 11):
         ap.error("Use Python 3.11+ in WSL, Kaggle or Colab")
     profile = choose_profile(args.profile)
+    odr_transport = ("direct" if profile in ("kaggle", "colab") else "server") \
+        if args.odr_transport == "auto" else args.odr_transport
     work = (args.workdir or (Path("/kaggle/working") if profile == "kaggle" else
                             Path("/content") if profile == "colab" else ROOT)).resolve()
     logs, odr, model_dir = work / "baseline-logs", work / "open_deep_research", work / "ollama-models"
@@ -115,7 +137,6 @@ def main(argv: list[str] | None = None) -> int:
         if os.getenv("OLLAMA_CONTEXT_LENGTH") and context != saved_context:
             raise RuntimeError("Resuming with a changed context length would mix benchmark configurations")
         context = saved_context
-        base["OLLAMA_CONTEXT_LENGTH"] = str(context)
     odr_ref = args.odr_ref or previous.get("odr_commit", "")
     if not odr.exists():
         command(["git", "clone", "--depth", "1", "https://github.com/langchain-ai/open_deep_research.git", str(odr)])
@@ -126,7 +147,12 @@ def main(argv: list[str] | None = None) -> int:
             command(["git", "-C", str(odr), "checkout", "--detach", "FETCH_HEAD"])
     sha = subprocess.check_output(["git", "-C", str(odr), "rev-parse", "HEAD"], text=True).strip()
     if args.install:
-        command([sys.executable, "-m", "pip", "install", "-q", "-e", str(odr), "langgraph-cli[inmem]", "langchain-ollama"])
+        # ODR's LangChain MCP adapter 0.3.2 requires the SDK 1.x interface.
+        # Resolve both pins together; otherwise the upstream mcp>=1.9.4
+        # may silently upgrade to MCP 2.x and break RequestContext imports.
+        command([sys.executable, "-m", "pip", "install", "-q", "-e", str(odr),
+                 "langgraph-cli[inmem]", "langchain-ollama",
+                 "mcp==1.29.0", "langchain-mcp-adapters==0.3.2"])
     (odr / ".env").touch(exist_ok=True)
     command([sys.executable, str(ROOT / "scripts" / "configure_odr_local.py"), str(odr)])
     cfg = odr / "langgraph.json"
@@ -136,8 +162,22 @@ def main(argv: list[str] | None = None) -> int:
         graph_json["python_version"] = python_version
         cfg.write_text(json.dumps(graph_json, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+    if args.install:
+        # Fail within the dependency installation phase, before downloading
+        # Ollama / Qwen model weights (2.5+ GB on every fresh Kaggle run).
+        command([sys.executable, "-c",
+                 "from importlib.metadata import version; "
+                 "assert version('mcp') == '1.29.0', version('mcp'); "
+                 "assert version('langchain-mcp-adapters') == '0.3.2', version('langchain-mcp-adapters'); "
+                 "from langchain_mcp_adapters.client import MultiServerMCPClient; "
+                 "from mrdre_baseline.services.search_mcp import mcp; "
+                 "from open_deep_research.deep_researcher import deep_researcher; "
+                 "assert hasattr(deep_researcher, 'ainvoke'); "
+                 "print('[READY] MCP SDK 1.29.0, adapter 0.3.2 and ODR graph imports OK')"], cwd=odr)
+
     ollama = shutil.which("ollama")
     if not ollama and args.install and os.name == "posix":
+        ensure_zstd(profile)
         command(["bash", "-o", "pipefail", "-c", "curl -fsSL https://ollama.com/install.sh | sh"])
         ollama = shutil.which("ollama")
     if not ollama:
@@ -176,26 +216,52 @@ def main(argv: list[str] | None = None) -> int:
             wait_online("http://127.0.0.1:8002/v1/models", "vLLM judge", 240)
 
     if not port_open("127.0.0.1", 8001):
-        service("mcp", [sys.executable, "-m", "mrdre_baseline.services.search_mcp"], base, ROOT, logs)
+        mcp_proc = service("mcp", [sys.executable, "-m", "mrdre_baseline.services.search_mcp"], base, ROOT, logs)
         for _ in range(90):
             if port_open("127.0.0.1", 8001):
+                print("[READY] MCP search server on 127.0.0.1:8001", flush=True)
+                break
+            if mcp_proc.poll() is not None:
                 break
             time.sleep(1)
         else:
-            raise RuntimeError("MCP did not start; see baseline-logs/mcp.log")
-    if not online("http://127.0.0.1:2024/docs"):
+            pass
+        if not port_open("127.0.0.1", 8001):
+            log_path = logs / "mcp.log"
+            if log_path.is_file():
+                recent = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-100:]
+                print("[MCP ERROR LOG]", file=sys.stderr, flush=True)
+                print("\n".join(recent), file=sys.stderr, flush=True)
+            raise RuntimeError(f"MCP did not start; exit={mcp_proc.poll()}; log={log_path}")
+    if odr_transport == "direct":
+        # Detect import/dependency issues before starting the hours-long run.
+        # No model inference takes place in this check.
+        command([sys.executable, "-c",
+                 "from open_deep_research.deep_researcher import deep_researcher; "
+                 "assert hasattr(deep_researcher, 'ainvoke'); "
+                 "print('[READY] Official ODR graph imported (direct mode)')"], cwd=odr)
+    elif not online("http://127.0.0.1:2024/ok"):
         cli = shutil.which("langgraph")
         if not cli:
             raise RuntimeError("langgraph CLI absent; run with --install")
         graph_env = {**base, "OLLAMA_HOST": "127.0.0.1:11434", "CUDA_VISIBLE_DEVICES": "0",
                      "LANGSMITH_TRACING": "false"}
         service("langgraph", [cli, "dev", "--allow-blocking", "--host", "127.0.0.1"], graph_env, odr, logs)
-        wait_online("http://127.0.0.1:2024/docs", "LangGraph", 120)
+        try:
+            wait_online("http://127.0.0.1:2024/ok", "LangGraph", 120)
+        except RuntimeError as exc:
+            log_file = logs / "langgraph.log"
+            if log_file.is_file():
+                lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                print("[DIAGNOSTIC] Last 100 lines of LangGraph log:", file=sys.stderr)
+                print("\n".join(lines[-100:]), file=sys.stderr, flush=True)
+            raise RuntimeError(f"{exc}; inspect {log_file}. "
+                               "Use --odr-transport direct to bypass the dev server.") from exc
 
     with urlopen("http://127.0.0.1:11434/api/tags", timeout=20) as response:
         tags = json.load(response)
     model_digest = next((m.get("digest") for m in tags.get("models", []) if m.get("name") == args.model), None)
-    info = {"profile": profile, "model": args.model, "model_digest": model_digest,
+    info = {"profile": profile, "odr_transport": odr_transport, "model": args.model, "model_digest": model_digest,
             "odr_commit": sha, "gpu_count": count, "gpu_names": gpu_devices,
             "judge_backend": args.judge_backend,
             "judge_model": args.vllm_model if args.judge_backend == "vllm" else args.model,

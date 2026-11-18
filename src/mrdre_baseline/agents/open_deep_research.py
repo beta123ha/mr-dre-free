@@ -5,8 +5,11 @@ for the officially evaluated DRA family (LC ODR) and the original Mr Dre DRA
 interface. Results are never synthesized on failure.
 """
 
+import asyncio
+from concurrent.futures import Future, ThreadPoolExecutor
 import os
 import time
+import uuid
 from typing import Any, List, Optional, Tuple, Union
 
 import requests
@@ -28,7 +31,12 @@ class OpenDeepResearchAgent(DeepResearchAgentBase):
         if self.mcp_url.endswith("/mcp"):
             raise ValueError("ODR_MCP_URL must be the MCP server BASE URL without /mcp: " + self.mcp_url)
         self.timeout = float(os.getenv("ODR_HTTP_TIMEOUT", "60"))
+        self.transport = os.getenv("ODR_TRANSPORT", "server").strip().lower()
+        if self.transport not in ("server", "direct"):
+            raise ValueError(f"Unsupported ODR_TRANSPORT: {self.transport}")
         self._runs: dict[str, str] = {}
+        self._futures: dict[str, Future] = {}
+        self._executor = None
         self._session = requests.Session()
 
     def _request(self, method: str, route: str, payload: dict = None) -> dict:
@@ -75,6 +83,14 @@ class OpenDeepResearchAgent(DeepResearchAgentBase):
         # Mr Dre reconstructs and supplies complete history each turn. We must
         # start a NEW LangGraph thread rather than append the whole history to
         # an existing thread (which would silently duplicate old messages).
+        if self.transport == "direct":
+            request_id = str(uuid.uuid4())
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="odr-direct")
+            self._futures[request_id] = self._executor.submit(
+                self._invoke_direct, messages, self._config()
+            )
+            return request_id
         thread = self._request("POST", "/threads", {})
         thread_id = thread["thread_id"]
         run = self._request("POST", f"/threads/{thread_id}/runs", {
@@ -86,12 +102,48 @@ class OpenDeepResearchAgent(DeepResearchAgentBase):
         self._runs[run_id] = thread_id
         return run_id
 
+    @staticmethod
+    def _invoke_direct(messages: list[dict], config: dict) -> str:
+        # Run the UNMODIFIED official LangChain ODR graph in-process. This
+        # avoids the separate LangGraph development server on cloud notebooks.
+        # The exact same messages/configuration are passed to the same graph.
+        from open_deep_research.deep_researcher import deep_researcher
+        result = asyncio.run(deep_researcher.ainvoke({"messages": messages}, config=config))
+        report = result.get("final_report") if isinstance(result, dict) else None
+        if not isinstance(report, str) or not report.strip():
+            raise RuntimeError(
+                "Official ODR graph produced no final_report; "
+                f"result keys: {list(result) if isinstance(result, dict) else type(result).__name__}"
+            )
+        return report
+
     def _run(self, request_id: str) -> dict:
         if request_id not in self._runs:
             raise ValueError(f"Unknown ODR run id {request_id}")
         return self._request("GET", f"/threads/{self._runs[request_id]}/runs/{request_id}")
 
     def poll(self, request_id: str) -> Tuple[bool, Optional[dict]]:
+        if self.transport == "direct":
+            future = self._futures.get(request_id)
+            if future is None:
+                raise ValueError(f"Unknown ODR request id {request_id}")
+            if not future.done():
+                return False, None
+            try:
+                report = future.result()
+            except Exception as exc:
+                raise RuntimeError(f"Direct official ODR graph failed: {exc}") from exc
+            return True, {
+                "resp_id": request_id,
+                "report": report,
+                "citations": [],
+                "usage": {"input_tokens": None, "output_tokens": None,
+                          "total_tokens": None, "cost": {}},
+                "metadata": {"agent": "langchain-open-deep-research",
+                             "transport": "direct", "thread_id": request_id,
+                             "local_model": self.local_model,
+                             "search_provider": "local_mcp_ddg"},
+            }
         run = self._run(request_id)
         status = run.get("status", "")
         if status in ("pending", "running"):
@@ -124,5 +176,14 @@ class OpenDeepResearchAgent(DeepResearchAgentBase):
             time.sleep(float(os.getenv("ODR_POLL_INTERVAL", "5")))
 
     def get_response(self, request_id: str) -> Tuple[str, Any]:
+        if self.transport == "direct":
+            future = self._futures.get(request_id)
+            if future is None:
+                raise ValueError(f"Unknown ODR request id {request_id}")
+            if not future.done():
+                return "running", None
+            if future.exception() is not None:
+                return "error", {"error": str(future.exception())}
+            return "success", {"report": future.result()}
         run = self._run(request_id)
         return run.get("status", "unknown"), run

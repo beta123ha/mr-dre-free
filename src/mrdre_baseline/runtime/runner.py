@@ -291,7 +291,29 @@ def ensure_manifest(output: Path, identity: dict) -> None:
         atomic_json(path, identity)
 
 
-def order_questions(data: list[dict], count: int, only_id: str | None) -> list[dict]:
+def order_questions(data: list[dict], count: int, only_id: str | None,
+                    first_original: bool = False,
+                    original_ids: tuple[str, ...] | None = None) -> list[dict]:
+    if original_ids is not None:
+        if first_original or only_id is not None:
+            raise ValueError('Use original_ids, --first-question, or --question-id exclusively')
+        if not original_ids or len(set(original_ids)) != len(original_ids):
+            raise ValueError('Question IDs must be nonempty and unique')
+        if count not in (-1, len(original_ids)):
+            raise ValueError('Count must equal the number of requested question IDs')
+        selected = []
+        for qid in original_ids:
+            matches = [row for row in data if str(row['id']) == qid]
+            if len(matches) != 1:
+                raise ValueError(f'Expected exactly one record with ID {qid}; found {len(matches)}')
+            selected.append(matches[0])
+        return selected
+    if first_original:
+        if not data:
+            raise ValueError("Dataset is empty")
+        if only_id is not None:
+            raise ValueError("Use --first-question OR --question-id, not both")
+        return [data[0]]
     values = data.copy()
     random.Random(42).shuffle(values)
     if only_id is not None:
@@ -307,6 +329,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dataset", default="ResearcherBench")
     ap.add_argument("--count", type=int, default=-1)
     ap.add_argument("--question-id")
+    ap.add_argument("--question-ids", nargs="+", metavar="ID",
+                    help="Run original ResearcherBench IDs in the given order without shuffling")
+    ap.add_argument("--first-question", action="store_true",
+                    help="Select exactly the first physical record of the original JSONL, without shuffling")
     ap.add_argument("--feedback", choices=[*FEEDBACK, "all"], default="all")
     ap.add_argument("--extra-eval", choices=["all", "presentation", "none"], default="all")
     ap.add_argument("--budget-minutes", type=float, default=0, help="0=no time limit; leave a platform safety margin")
@@ -315,6 +341,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--retries", type=int, default=0)
     ap.add_argument("--dry-run", action="store_true", help="Display the execution DAG without running models")
     args = ap.parse_args(argv)
+    if sum(bool(x) for x in (args.first_question, args.question_id is not None, bool(args.question_ids))) > 1:
+        ap.error("Select exactly one of --first-question, --question-id, or --question-ids")
+    if args.question_ids and args.count not in (-1, len(args.question_ids)):
+        ap.error("--count must match the number of --question-ids")
+    if args.first_question and args.count not in (-1, 1):
+        ap.error("--first-question selects exactly one; use --count 1")
     if args.count == 0 or args.count < -1 or args.retries < 0:
         ap.error("--count must be -1 or positive, and --retries nonnegative")
     from dotenv import load_dotenv
@@ -323,7 +355,15 @@ def main(argv: list[str] | None = None) -> int:
     if not dataset_file.is_file():
         ap.error(f"Dataset missing: {dataset_file}")
     from mrdre_baseline.core.io import load_jsonl
-    questions = order_questions(load_jsonl(str(dataset_file)), args.count, args.question_id)
+    questions = order_questions(load_jsonl(str(dataset_file)), args.count, args.question_id,
+                                first_original=args.first_question,
+                                original_ids=tuple(args.question_ids) if args.question_ids else None)
+    if args.question_ids:
+        print(f"[SELECTION] Original ResearcherBench IDs: {','.join(args.question_ids)}; "
+              "strictly sequential; no shuffling", flush=True)
+    if args.first_question:
+        print(f"[SELECTION] First original ResearcherBench record: ID={questions[0]['id']}; "
+              "one question only; no shuffling", flush=True)
     modes = tuple(FEEDBACK) if args.feedback == "all" else (args.feedback,)
     if args.dry_run:
         print("\n".join(f"{t.kind:5} {t.name:18} after {','.join(t.deps) or '-'}" for t in task_plan(modes, args.extra_eval)))
@@ -339,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
     settings.update({"MRDRE_LLM_BACKEND": "ollama", "MRDRE_LOCAL_MODEL": runtime.get("model", os.getenv("MRDRE_LOCAL_MODEL", "qwen3:4b-instruct")),
                      "ODR_LOCAL_MODEL": runtime.get("model", os.getenv("ODR_LOCAL_MODEL", "qwen3:4b-instruct")),
                      "ODR_URL": runtime.get("odr_url", os.getenv("ODR_URL", "http://127.0.0.1:2024")),
+                     "ODR_TRANSPORT": runtime.get("odr_transport", "server"),
                      "ODR_MCP_URL": runtime.get("mcp_url", os.getenv("ODR_MCP_URL", "http://127.0.0.1:8001")),
                      "MRDRE_CRAWLER": "direct", "PYTHONUNBUFFERED": "1"})
     for key, default in (("ODR_RESEARCH_ITERATIONS", "3"), ("ODR_MAX_TOOL_CALLS", "6"),
@@ -346,7 +387,11 @@ def main(argv: list[str] | None = None) -> int:
                          ("REQUEST_TIMEOUT_SECONDS", "2700"), ("POLL_INTERVAL_SECONDS", "2"),
                          ("BATCH_TIMEOUT_MINUTES", "75")):
         settings.setdefault(key, default)
-    ensure_manifest(output, manifest_identity(dataset_file, settings, runtime))
+    identity = manifest_identity(dataset_file, settings, runtime)
+    identity["selection"] = (f"original-ids:{','.join(args.question_ids)}" if args.question_ids else
+                             "first-original" if args.first_question else
+                             f"id:{args.question_id}" if args.question_id is not None else "seed42")
+    ensure_manifest(output, identity)
     policy = ResourcePolicy.detect(runtime)
     print(f"[RESOURCES] {policy.gpu_count} GPU(s), {policy.max_workers} max judge workers, one question at a time", flush=True)
     deadline = time.monotonic() + args.budget_minutes * 60 if args.budget_minutes else float("inf")

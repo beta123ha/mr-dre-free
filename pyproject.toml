@@ -19,7 +19,7 @@ dependencies = [
     "ddgs>=9,<11",
     "beautifulsoup4>=4.12,<5",
     "pypdf>=5,<7",
-    "mcp>=1.15,<2",
+    "mcp==1.29.0",
     "psutil>=6,<8",
 ]
 
