@@ -99,3 +99,28 @@ def test_manifest_rejects_mixed_protocols(tmp_path):
     ensure_manifest(output, {"model": "A"})
     with pytest.raises(RuntimeError):
         ensure_manifest(output, {"model": "B"})
+
+
+def test_original_question_ids_234_no_shuffle_and_no_other_questions():
+    records = [{"id": n} for n in range(1, 66)]
+    selected = order_questions(records, 3, None, original_ids=("2", "3", "4"))
+    assert [x["id"] for x in selected] == [2, 3, 4]
+    with pytest.raises(ValueError, match="exactly one"):
+        order_questions(records, 3, None, original_ids=("2", "200", "4"))
+    with pytest.raises(ValueError, match="unique"):
+        order_questions(records, 3, None, original_ids=("2", "2", "4"))
+    with pytest.raises(ValueError, match="Count"):
+        order_questions(records, 2, None, original_ids=("2", "3", "4"))
+    with pytest.raises(ValueError, match="exclusively"):
+        order_questions(records, 3, "2", original_ids=("2", "3", "4"))
+
+
+def test_original_question_ids_567_no_shuffle_and_no_other_questions():
+    records = [{"id": n} for n in range(1, 66)]
+    selected = order_questions(records, 3, None, original_ids=("5", "6", "7"))
+    assert [x["id"] for x in selected] == [5, 6, 7]
+    assert len(task_plan(("content", "format", "reflect"), "all")) == 19
+    with pytest.raises(ValueError, match="exactly one"):
+        order_questions(records, 3, None, original_ids=("5", "66", "7"))
+    with pytest.raises(ValueError, match="Count"):
+        order_questions(records, 2, None, original_ids=("5", "6", "7"))
